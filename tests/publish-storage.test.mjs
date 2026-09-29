@@ -24,6 +24,25 @@ test("creates a new file and reports created=true", async (t) => {
   assert.equal(await readFile(filePath, "utf8"), "first version\n");
 });
 
+test("rejects a concurrent create collision with status 409", async (t) => {
+  const dir = await makeTempDir(t);
+  const filePath = path.join(dir, "article.md");
+  const markdown = ["first version\n", "second version\n"];
+
+  const writes = await Promise.allSettled(
+    markdown.map((content) => writeLocalUpsert(filePath, content)),
+  );
+  const fulfilled = writes.filter((write) => write.status === "fulfilled");
+  const rejected = writes.filter((write) => write.status === "rejected");
+
+  assert.equal(fulfilled.length, 1);
+  assert.deepEqual(fulfilled[0].value, { created: true });
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].reason.status, 409);
+  assert.ok(markdown.includes(await readFile(filePath, "utf8")));
+  assert.deepEqual(await readdir(dir), ["article.md"]);
+});
+
 test("replaces the complete existing file and reports created=false", async (t) => {
   const dir = await makeTempDir(t);
   const filePath = path.join(dir, "article.md");
