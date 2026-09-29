@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, link, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export class PublishStorageError extends Error {
@@ -12,9 +12,9 @@ export class PublishStorageError extends Error {
 }
 
 /**
- * Atomically create or replace a content file using a temporary file in the
- * destination directory. The returned flag reflects whether the target
- * existed before this write began.
+ * Atomically create a file without clobbering a competing create, or replace
+ * an existing file. A same-directory temporary file keeps replacement atomic.
+ * If another writer wins a create race, reject with PublishStorageError(409).
  *
  * @param {string} filePath
  * @param {string} markdown
@@ -39,7 +39,19 @@ export async function writeLocalUpsert(filePath, markdown) {
 
   try {
     await writeFile(temporaryPath, markdown, { encoding: "utf8", flag: "wx" });
-    await rename(temporaryPath, filePath);
+    if (created) {
+      try {
+        await link(temporaryPath, filePath);
+      } catch (error) {
+        if (error?.code === "EEXIST") {
+          throw new PublishStorageError(409, "로컬 콘텐츠가 이미 있습니다");
+        }
+        throw error;
+      }
+      await rm(temporaryPath, { force: true });
+    } else {
+      await rename(temporaryPath, filePath);
+    }
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => {});
     throw error;
