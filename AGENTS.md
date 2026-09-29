@@ -14,7 +14,8 @@ MAGMA(3040 남성 패션 브랜드)의 회사소개 사이트 스타터입니다
 - 홈, 회사소개, 블로그 목록/상세, 실적 목록/상세
 - 다크 에디토리얼 브랜드 토큰
 - 마크다운 콘텐츠 파이프라인
-- `POST /api/posts` 발행 API
+- `POST /api/posts` create-only 발행 API
+- `PUT /api/posts/{slug}` upsert 발행 API
 
 ## 수강생이 채우는 TODO 슬롯
 
@@ -42,7 +43,7 @@ MAGMA(3040 남성 패션 브랜드)의 회사소개 사이트 스타터입니다
 
 1. **frontmatter 필드명 유지**: `title` `description` `date` `tags` `thumbnail` `draft` `period` `dashboardUrl`.
 2. **slug 규칙 유지**: 파일명 = slug, `^[a-z0-9]+(-[a-z0-9]+)*$`.
-3. **발행 API 계약 유지**: `POST /api/posts` · `collection: "posts"(기본)|"reports"` · 응답 `{collection, slug, url, mode, commitUrl?}`.
+3. **발행 API 계약 유지**: `collection`은 `posts`가 기본이고 `reports`도 허용한다. `POST /api/posts`는 create-only로 유지하며 같은 slug면 409다. `PUT /api/posts/{slug}`는 기존 필드 전체를 보내 생성(201) 또는 전체 교체(200)하며, 본문 slug가 있으면 경로 slug와 일치해야 한다. 인증 실패는 401, 입력 검증 오류는 400/422, 저장소 충돌은 409다. 성공 응답은 `{collection, slug, url, mode, commitUrl?}`다.
 4. **대시보드 임베드 방식 유지**: 리포트 본문에 `<iframe>` raw HTML을 직접 넣지 말고 `dashboardUrl`을 사용합니다.
 5. **외부 폰트 다운로드 금지**: 백지 환경 빌드를 위해 `next/font/google`을 쓰지 않습니다. 폰트는 `tokens.css`의 시스템 폰트 스택을 사용합니다.
 6. **색상은 토큰 경유만**: 컴포넌트에 hex를 직접 쓰지 말고 `bg-canvas` `text-ink` `text-primary` `text-accent` 등 토큰 유틸리티를 사용합니다.

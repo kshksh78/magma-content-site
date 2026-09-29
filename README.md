@@ -12,7 +12,8 @@ MAGMA(3040 남성 패션 브랜드)의 회사소개 사이트 스타터입니다
 - 홈, 회사소개, 블로그, 실적 보고 페이지
 - 패션 브랜드 톤의 다크 에디토리얼 디자인
 - 마크다운 기반 블로그/리포트 렌더링
-- `POST /api/posts` 발행 API
+- `POST /api/posts` create-only 발행 API
+- `PUT /api/posts/{slug}` 생성 또는 전체 교체 API
 - Vercel 배포와 GitHub 커밋 발행을 위한 환경변수 구조
 
 ## 수강생이 채울 슬롯
@@ -67,7 +68,7 @@ content/posts/         블로그 글 (마크다운 1파일 = 1글)
 content/reports/       실적 보고 리포트 (마크다운)
 src/lib/content.ts     글·리포트 읽기 (frontmatter 파싱·정렬·draft 제외)
 src/lib/publish.ts     발행 API 내부 로직
-src/app/api/posts/     발행 API 엔드포인트 (POST /api/posts)
+src/app/api/posts/     발행 API 엔드포인트 (POST /api/posts, PUT /api/posts/{slug})
 src/components/        Hero · HeroMedia · PostCard · ReportCard · DashboardEmbed
 src/styles/tokens.css  DESIGN.md 를 코드로 옮긴 디자인 토큰
 scripts/preflight.mjs  배포 전 점검 스크립트
@@ -115,6 +116,17 @@ curl -X POST https://{내-배포-주소}/api/posts \
   -d '{"title":"첫 자동 발행","description":"발행 API 테스트","content":"본문입니다.","draft":false}'
 ```
 
+같은 endpoint에서 기존 `POST`는 create-only이며, 같은 slug가 있으면 409를 반환합니다. 기존 콘텐츠를 만들거나 교체하려면 URL의 slug를 대상으로 PUT을 사용합니다.
+
+```bash
+curl -X PUT https://{내-배포-주소}/api/posts/my-first-post \
+  -H "Authorization: Bearer ***" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"첫 자동 발행","description":"발행 API 테스트","content":"본문입니다.","tags":["테스트"],"date":"2026-09-29","draft":false}'
+```
+
+PUT은 전체 콘텐츠를 교체하므로 기존 데이터를 유지하려면 전체 필드를 보내야 합니다. URL slug가 대상이며, 본문에 `slug`를 포함하는 경우 URL slug와 같아야 합니다. 없으면 201로 생성하고, 있으면 200으로 전체 교체합니다. GitHub SHA 또는 동시 생성 충돌은 409로 중단되며 자동 재시도하지 않습니다.
+
 실적 리포트는 `collection: "reports"`를 함께 보냅니다.
 
 ```json
@@ -131,11 +143,13 @@ curl -X POST https://{내-배포-주소}/api/posts \
 
 | 응답 코드 | 의미 |
 | --- | --- |
-| 201 | 발행 성공 — `collection`·`slug`·`url` 반환 |
+| 201 | `POST` 생성 성공 또는 `PUT` 신규 생성 — `collection`·`slug`·`url`·`mode` 반환 |
+| 200 | `PUT` 기존 콘텐츠 전체 교체 성공 — 응답 필드는 기존 `PublishResult`와 동일 |
 | 400 | `collection` 값이 `posts` 또는 `reports`가 아님 |
 | 401 | 인증 키 불일치 |
-| 409 | 같은 slug의 파일이 이미 있음 |
-| 422 | 필수 필드 누락·형식 오류 (`fields`에 상세) |
+| 409 | `POST` 대상 slug가 이미 있음 또는 `PUT` 저장소 충돌 |
+| 422 | JSON·필수 필드·형식 오류, 잘못된 URL slug 또는 본문 slug 불일치 |
+| 502 | GitHub 저장소 조회·저장 실패 |
 
 로컬 개발(`NODE_ENV=development`)에서는 GitHub 환경변수의 유무와 관계없이 `content/<collection>/`에 파일을 직접 씁니다.
 Vercel 배포 환경에서는 `GITHUB_TOKEN`과 `GITHUB_REPO`가 설정되어 있으면 GitHub Contents API로 커밋합니다.
