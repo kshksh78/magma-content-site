@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { COLLECTIONS, Collection, contentHref } from "@/lib/content";
+import { commitToGitHubUpsert, PublishStorageError, writeLocalUpsert } from "@/lib/publish-storage.mjs";
 
 export class PublishError extends Error {
   constructor(
@@ -50,6 +51,77 @@ export async function publishPost(input: unknown): Promise<PublishResult> {
   throw new PublishError(500, {
     error: "GITHUB_TOKEN·GITHUB_REPO 미설정 — Vercel 환경변수를 확인하세요 (.env.example 참고)",
   });
+}
+
+export async function upsertPost(
+  input: unknown,
+  pathSlug: string,
+): Promise<{ result: PublishResult; created: boolean }> {
+  if (typeof pathSlug !== "string" || !SLUG_RE.test(pathSlug)) {
+    throw new PublishError(422, { error: "잘못된 경로 slug입니다", slug: pathSlug });
+  }
+
+  const p = validate(input);
+  if (p.slug !== undefined && p.slug !== pathSlug) {
+    throw new PublishError(422, {
+      error: "본문 slug와 경로 slug가 일치해야 합니다",
+      slug: pathSlug,
+    });
+  }
+
+  const date = p.date ?? kstToday();
+  const md = buildMarkdown({ ...p, date });
+
+  if (process.env.NODE_ENV === "development") {
+    const filePath = path.join(process.cwd(), "content", p.collection, `${pathSlug}.md`);
+    try {
+      const { created } = await writeLocalUpsert(filePath, md);
+      return {
+        result: {
+          collection: p.collection,
+          slug: pathSlug,
+          url: contentHref(p.collection, pathSlug),
+          mode: "local",
+        },
+        created,
+      };
+    } catch {
+      throw new PublishError(500, { error: "로컬 콘텐츠 저장에 실패했습니다" });
+    }
+  }
+
+  const token = process.env.GITHUB_TOKEN;
+  const repoFull = process.env.GITHUB_REPO;
+  if (!token || !repoFull) {
+    throw new PublishError(500, {
+      error: "GITHUB_TOKEN·GITHUB_REPO 미설정 — Vercel 환경변수를 확인하세요 (.env.example 참고)",
+    });
+  }
+
+  try {
+    const { created, commitUrl } = await commitToGitHubUpsert({
+      repoFull,
+      token,
+      collection: p.collection,
+      slug: pathSlug,
+      markdown: md,
+    });
+    return {
+      result: {
+        collection: p.collection,
+        slug: pathSlug,
+        url: contentHref(p.collection, pathSlug),
+        mode: "github",
+        ...(commitUrl ? { commitUrl } : {}),
+      },
+      created,
+    };
+  } catch (error) {
+    if (error instanceof PublishStorageError) {
+      throw new PublishError(error.status, { error: error.message });
+    }
+    throw new PublishError(502, { error: "GitHub 콘텐츠 저장에 실패했습니다" });
+  }
 }
 
 interface ValidInput {
